@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """query_arbitrators.py — Tier 1 arbitrator analytics over the UNCTAD ISDS
-Navigator full-data Excel (31/12/2023 snapshot).
+Navigator full-data Excel (31/12/2025 release only).
 
 Part of the isds-arbitrators skill (sibling to isds-research).
 Data basis: treaty-based ISDS only; commercial-arbitration appointments and
@@ -16,12 +16,65 @@ Usage examples:
   python3 query_arbitrators.py --shortlist --issue expropriation --found \
       --weights my-weights.json
 """
-import argparse, json, os, re, sys, unicodedata
+import argparse, json, os, re, sys, unicodedata, warnings
 from collections import Counter, defaultdict
 
-HEADER_ROW = 12  # headers at row 12, data from 13 (1-indexed)
-SNAPSHOT = "31/12/2023"
-SNAPSHOT_CASES = 1332
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")  # 2025 file: benign print-area warning
+
+# v1.1.0: this version works with ONE release only — the 31/12/2025 full-data
+# Excel (header row 13, 28 columns, 1,463 cases). Any other release is refused
+# with download guidance. The header row is located by its text, never by a
+# fixed row number (the 2023 release had it on row 12; a fixed number read the
+# 2025 header line as a case).
+SNAPSHOT = "31/12/2025"
+SNAPSHOT_LONG = "31 December 2025"
+SNAPSHOT_YEAR = 2025
+SNAPSHOT_CASES = 1463
+RELEASE_PAGE = "https://investmentpolicy.unctad.org/publications/1325/investment-dispute-settlement-navigator-full-isds-data-release-as-of-31-12-2025-"
+RELEASE_FILE = "https://investmentpolicy.unctad.org/uploaded-files/document/UNCTAD-ISDS-Navigator-data-set-31December2025.xlsx"
+EXPECTED_HEADERS = [
+    "NO.", "YEAR OF INITIATION", "SHORT CASE NAME", "FULL CASE NAME", "APPLICABLE IIA",
+    "ARBITRAL RULES", "ADMINISTERING INSTITUTION", "STATUS/OUTCOME OF ORIGINAL PROCEEDINGS",
+    "RESPONDENT STATE", "HOME STATE OF INVESTOR", "ECONOMIC SECTOR", "ECONOMIC SUBSECTOR",
+    "SUMMARY OF THE DISPUTE", "DETAILS OF INVESTMENT", "ARBITRATORS", "DECISIONS",
+    "INDIVIDUAL OPINIONS DETAILS", "AMOUNT CLAIMED (EXPRESSED IN MILLIONS)",
+    "AMOUNT AWARDED (OR SETTLED FOR) (EXPRESSED IN MILLIONS)", "IIA BREACHES ALLEGED",
+    "IIA BREACHES FOUND", "FOLLOW-ON PROCEEDING TYPE", "FOLLOW-ON PROCEEDING STATUS",
+    "FOLLOW-ON DECISIONS", "FOLLOW-ON INDIVIDUAL OPINIONS", "ICSID ANNULMENT COMMITTEE MEMBERS",
+    "LINK TO ITALAW'S CASE PAGE", "LINKS TO BACKGROUND SOURCES"]
+WRONG_RELEASE_MSG = (
+    "WRONG_RELEASE: the UNCTAD Excel at {path} is the release dated \"{found}\".\n"
+    "This version of the skill works only with the 31 December 2025 release (1,463 cases):\n"
+    "its column layout, counts and data-freshness statements were built and tested on that\n"
+    "release alone. Ask the user to download it and put it in the skill's data/ folder (an\n"
+    "older file may stay beside it; the 31/12/2025 release is picked automatically):\n"
+    f"  Release page: {RELEASE_PAGE}\n"
+    f"  Direct link:  {RELEASE_FILE}\n"
+    "Do not build profiles or shortlists from the other release in the meantime.")
+
+
+def release_of(wb):
+    """The 'Updated as of' date printed in the workbook itself, or None."""
+    for ws in wb.worksheets:
+        for r in ws.iter_rows(min_row=1, max_row=15, values_only=True):
+            for v in r:
+                m = re.search(r"Updated as of\s+(.+?)\s*$", str(v or ""))
+                if m:
+                    return m.group(1).strip()
+    return None
+
+
+def is_required_release(found):
+    return re.sub(r"\s+", "", str(found or "")).lower() == SNAPSHOT_LONG.replace(" ", "").lower()
+
+
+def header_row_of(ws):
+    """1-indexed row holding the column headers (located by text), or None."""
+    for i, r in enumerate(ws.iter_rows(min_row=1, max_row=40, values_only=True), start=1):
+        cells = [str(c or "").strip().upper() for c in r]
+        if "NO." in cells and "SHORT CASE NAME" in cells and "ARBITRATORS" in cells:
+            return i
+    return None
 LAST_KNOWN_NAVIGATOR = {"as_of": "31/12/2025", "total": 1463, "observed": "2026-07-02"}
 
 COL = dict(no=0, year=1, short=2, full=3, iia=4, rules=5, inst=6, status=7,
@@ -32,6 +85,29 @@ COL = dict(no=0, year=1, short=2, full=3, iia=4, rules=5, inst=6, status=7,
            italaw=26, background=27)
 
 PLACEHOLDER_RE = re.compile(r"not available|not constituted|^none$|^n/?a$", re.I)
+
+# v1.1.1 (fix 1, 2026-10-27): UNCTAD separates several values in one cell with
+# ";" + newline. A single label can itself contain "; " (e.g. "Tertiary - E -
+# Water supply; sewerage, waste management and remediation activities"), so a
+# bare ";" is NOT a value separator. A bare newline is also treated as a
+# separator; no counted column contains one in the 31/12/2025 release.
+MULTI_SEP_RE = re.compile(r";?[ \t]*\r?\n")
+
+
+def split_values(v):
+    """Split a multi-value UNCTAD cell into its values (see MULTI_SEP_RE)."""
+    out = []
+    for x in MULTI_SEP_RE.split(str(v or "")):
+        x = x.strip().rstrip(";").strip()
+        if x:
+            out.append(x)
+    return out
+
+
+# v1.1.1 (fix 6, 2026-10-27): follow-on outcomes that undo an award, in
+# UNCTAD's wording ("Award/decision annulled in its entirety …", "… partially
+# set aside …"). UNCTAD records the outcome, never the ground.
+UNDONE_RE = re.compile(r"\bannulled\b|\bset aside\b", re.I)
 
 # R1 (Green, 2026-08-02): the opinions denominator counts only cases with at
 # least one SUBSTANTIVE decision — an award, or a decision on jurisdiction,
@@ -109,11 +185,27 @@ class Dataset:
     def __init__(self, excel_path, overlay):
         import openpyxl
         wb = openpyxl.load_workbook(excel_path, read_only=True)
+        found = release_of(wb)
+        if not is_required_release(found):
+            print(WRONG_RELEASE_MSG.format(path=excel_path, found=found or "unknown"))
+            sys.exit(3)
         ws = wb[wb.sheetnames[0]]
+        hrow = header_row_of(ws)
+        if hrow is None:
+            sys.exit(f"ERROR: header row not found in {excel_path} — is this the UNCTAD full-data Excel?")
+        hdr = [str(c or "").strip().upper()
+               for c in next(ws.iter_rows(min_row=hrow, max_row=hrow, values_only=True))]
+        if hdr[:len(EXPECTED_HEADERS)] != EXPECTED_HEADERS:
+            bad = [(i, e, g) for i, (e, g) in enumerate(zip(EXPECTED_HEADERS, hdr)) if e != g]
+            sys.exit(f"ERROR: column layout differs from the {SNAPSHOT} release "
+                     f"(first mismatch: column {bad[0][0] + 1 if bad else len(hdr)}). Refusing to read it.")
         self.rows = []
-        for r in ws.iter_rows(min_row=HEADER_ROW + 1, values_only=True):
+        for r in ws.iter_rows(min_row=hrow + 1, values_only=True):
             if r[COL["short"]]:
                 self.rows.append(r)
+        if len(self.rows) != SNAPSHOT_CASES:
+            print(f"WARNING: {len(self.rows)} case rows read; the {SNAPSHOT} release has "
+                  f"{SNAPSHOT_CASES}. Report this discrepancy with any count given.", file=sys.stderr)
         self.overlay = overlay
         self.merge = overlay.get("merge", {})
         self.author_overrides = {norm(k): v for k, v in overlay.get("author_overrides", {}).items()}
@@ -270,11 +362,17 @@ class Dataset:
             if str(self.rows[c][COL["opinions"]] or "").strip() != "Data not available"
             and substantive_decisions(self.rows[c][COL["decisions"]]))
         def col_counter(col):
+            # v1.1.1 (fix 1): count each VALUE in a multi-value cell, not the
+            # whole cell string (a two-sector case counts once per sector).
+            # N1 (2026-10-27): each DISTINCT value counts once per case. UNCTAD
+            # aligns the sector cell row-for-row with the subsector cell, so a
+            # sector repeats once per subsector (e.g. "Manufacturing;
+            # Manufacturing; Wholesale…") — the counts are of CASES.
             ctr = Counter()
             for c in cases:
-                v = str(self.rows[c][col] or "").strip()
-                if v and not PLACEHOLDER_RE.search(v):
-                    ctr[v] += 1
+                for v in dict.fromkeys(split_values(self.rows[c][col])):
+                    if not PLACEHOLDER_RE.search(v):
+                        ctr[v] += 1
             return ctr
         issue_alleged, issue_found = Counter(), Counter()
         # v0.9.3 (A4/F12): renamed from dissent_in_found — it counts
@@ -328,6 +426,20 @@ class Dataset:
         pending = sum(1 for c in cases if str(self.rows[c][COL["status"]] or "").strip() == "Pending")
         years = [int(self.rows[c][COL["year"]]) for c in cases
                  if str(self.rows[c][COL["year"]] or "").strip().isdigit()]
+        # v1.1.1 (fix 6): awards in this arbitrator's cases that the UNCTAD
+        # follow-on fields record as annulled or set aside. Outcome only — the
+        # ground is not in the dataset and must never be implied.
+        # The FULL follow-on sequence is kept, not just the matching entry: a
+        # set-aside can be reversed on appeal (e.g. Yukos: upheld -> set aside
+        # -> upheld), and an annulled award can be re-won on resubmission.
+        undone = []
+        for c in cases:
+            seq = split_values(self.rows[c][COL["fo_status"]])
+            if any(UNDONE_RE.search(o) for o in seq):
+                undone.append(dict(
+                    case=self.rows[c][COL["short"]], year=self.rows[c][COL["year"]],
+                    role="/".join(s["role"] for s in seats if s["case"] == c),
+                    follow_on=seq))
         case_rows = []
         for c in cases:
             r = self.rows[c]
@@ -361,6 +473,17 @@ class Dataset:
             home_states=dict(col_counter(COL["home"]).most_common(5)),
             iias=dict(col_counter(COL["iia"]).most_common(5)),
             iias_total=len(col_counter(COL["iia"])),
+            subsectors=dict(col_counter(COL["subsector"]).most_common(5)),
+            # v1.1.1 (fix 2): FULL counters for shortlist scoring. The dicts
+            # above are truncated for display (top 5/6/10) and must never be
+            # scored: a sector or State outside the top 5 used to score 0.
+            sectors_all=dict(col_counter(COL["sector"])),
+            subsectors_all=dict(col_counter(COL["subsector"])),
+            respondents_all=dict(col_counter(COL["respondent"])),
+            rules_all=dict(col_counter(COL["rules"])),
+            issue_alleged_all=dict(issue_alleged),
+            issue_found_all=dict(issue_found),
+            annulled_or_set_aside=undone,
             statuses=dict(col_counter(COL["status"]).most_common(8)),
             issue_alleged=dict(issue_alleged.most_common(10)),
             issue_found=dict(issue_found.most_common(10)),
@@ -372,6 +495,7 @@ class Dataset:
     # ---------- shortlist ----------
     def shortlist(self, issue=None, found_only=False, rules=None, sector=None,
                   respondent=None, role=None, treaty=None, weights=None, top=10,
+                  subsector=None,
                   min_seats=3, respondent_gate=False, raw_scores=False):
         weights = weights or {}
         cands = Counter(s["token"] for s in self.seats)
@@ -398,20 +522,26 @@ class Dataset:
                 # v0.9.5 (E2): --issue is repeatable; a category counts once
                 # even if it matches several of the requested substrings.
                 issues = [issue] if isinstance(issue, str) else list(issue)
-                key_a = sum(v for k, v in p["issue_alleged"].items()
+                key_a = sum(v for k, v in p["issue_alleged_all"].items()
                             if any(norm(i) in norm(k) for i in issues))
-                key_f = sum(v for k, v in p["issue_found"].items()
+                key_f = sum(v for k, v in p["issue_found_all"].items()
                             if any(norm(i) in norm(k) for i in issues))
                 sub["issue_alleged"] = key_a
                 sub["issue_found"] = key_f
                 if found_only and key_f == 0:
                     continue
             if rules:
-                sub["rules_match"] = sum(v for k, v in p["rules"].items() if norm(rules) in norm(k))
+                sub["rules_match"] = sum(v for k, v in p["rules_all"].items() if norm(rules) in norm(k))
             if sector:
-                sub["sector_match"] = sum(v for k, v in p["sectors"].items() if norm(sector) in norm(k))
+                sub["sector_match"] = sum(v for k, v in p["sectors_all"].items() if norm(sector) in norm(k))
+            if subsector:
+                # v1.1.1 (fix 5): UNCTAD ECONOMIC SUBSECTOR, e.g.
+                # "61 - Telecommunications" (sector J alone also covers media
+                # and publishing).
+                sub["subsector_match"] = sum(v for k, v in p["subsectors_all"].items()
+                                             if norm(subsector) in norm(k))
             if respondent:
-                sub["respondent_match"] = sum(v for k, v in p["respondents"].items()
+                sub["respondent_match"] = sum(v for k, v in p["respondents_all"].items()
                                               if norm(respondent) in norm(k))
                 # v0.9.3 (A18): optional gating — at the default weight (0.5,
                 # non-gating) the respondent filter is effectively inert for
@@ -436,7 +566,8 @@ class Dataset:
             sub["availability_penalty"] = p["pending_at_snapshot"]
             results.append(dict(token=token, subscores=sub,
                                 seats=p["seats"], pending=p["pending_at_snapshot"],
-                                roles=p["roles"]))
+                                roles=p["roles"],
+                                annulled_or_set_aside=len(p["annulled_or_set_aside"])))
         # v0.9.6 (E1): sub-scores are raw counts on wildly different scales,
         # so raw weighting lets volume dominate an ostensibly issue-weighted
         # ranking (121 role-fit appointments at weight 2.0 outscore 8 issue
@@ -490,6 +621,7 @@ DEFAULT_WEIGHTS = {  # proposed defaults — printed with every shortlist; user-
     "treaty_match": 2.0,
     "rules_match": 1.0,
     "sector_match": 1.0,
+    "subsector_match": 1.0,
     "respondent_match": 0.5,
     "role_fit": 2.0,
     "experience": 0.3,
@@ -660,7 +792,7 @@ def delta_report(ds, token, profile_case_numbers, profile_lines=None):
                  f"lines with no recognisable case number: {len(unrecognised)}")
     L.append(f"ICSID profile case numbers supplied: {len(prof)}")
     L.append(f"- In both: {len(in_both)}")
-    L.append(f"- Profile-only (absent from 2023 Excel — post-snapshot, non-treaty, or "
+    L.append(f"- Profile-only (absent from the {SNAPSHOT} Excel — post-snapshot, non-treaty, or "
              f"annulment-phase): {len(profile_only)} -> {', '.join(profile_only) or '—'}")
     L.append(f"- Excel-only (non-ICSID fora, or number not on profile): {len(excel_only)}")
     L.append(f"- Pending at snapshot (need live status check): {len(pending_at_snap)} -> "
@@ -676,7 +808,7 @@ def delta_report(ds, token, profile_case_numbers, profile_lines=None):
     # vice versa (proven: ARB/23/43 accepted 02/2024 vs ARB/23/25 accepted
     # 11/2023). Flag boundary-vintage profile-only cases for per-case
     # acceptance-date classification.
-    snap_year = int(SNAPSHOT.split("/")[-1])
+    snap_year = SNAPSHOT_YEAR
     boundary = [n for n in profile_only
                 for m in [re.search(r"/(\d{2})/", n)]
                 if m and 2000 + int(m.group(1)) <= snap_year]
@@ -769,8 +901,7 @@ def write_annex(ds, p, path):
                 "take it from the ICSID profile or case page where retrieved."])
     src.append(["'Separate opinions' lists published individual opinions by THIS arbitrator "
                 "recorded for the case; silence is not proof of unanimity."])
-    src.append([f"Live Navigator last known: {LAST_KNOWN_NAVIGATOR['total']} cases "
-                f"as of {LAST_KNOWN_NAVIGATOR['as_of']}."])
+    src.append([live_navigator_note()])
     src.append(["Not legal advice; research aid only."])
 
     # v0.9.4: presentation formatting — spec mirrored in
@@ -810,15 +941,24 @@ def write_annex(ds, p, path):
     wb.save(path)
 
 
+def live_navigator_note():
+    k = LAST_KNOWN_NAVIGATOR
+    if k["as_of"] == SNAPSHOT:
+        return (f"Live Navigator: when last observed ({k['observed']}) it was on this same "
+                f"{SNAPSHOT} release ({k['total']} cases); it refreshes ~biannually, so a newer "
+                "release may exist — not verified now.")
+    return (f"Live Navigator last known: {k['total']} cases as of {k['as_of']} "
+            f"(last observed {k['observed']}).")
+
+
 def freshness_footer():
     return (
         "\n---\nDATA FRESHNESS: computed from the UNCTAD ISDS Navigator full-data Excel, "
-        f"snapshot {SNAPSHOT} ({SNAPSHOT_CASES} cases). The live Navigator reported "
-        f"{LAST_KNOWN_NAVIGATOR['total']} cases as of {LAST_KNOWN_NAVIGATOR['as_of']} "
-        f"(last observed {LAST_KNOWN_NAVIGATOR['observed']}). Counts above EXCLUDE anything "
-        "after the snapshot — for active arbitrators they materially understate current "
-        "activity; run the live ICSID profile lookup and the newer-cases check before "
-        "relying on them (and note the profile page is a floor, not a case list).\n"
+        f"snapshot {SNAPSHOT} ({SNAPSHOT_CASES} cases). {live_navigator_note()} "
+        f"Counts above EXCLUDE anything after {SNAPSHOT} (new cases and later developments) "
+        "— for active arbitrators they understate current activity; run the live ICSID "
+        "profile lookup and the newer-cases check before relying on them (and note the "
+        "profile page is a floor, not a case list).\n"
         "SCOPE: treaty-based ISDS only; commercial-arbitration appointments and confidential "
         "cases are invisible; UNCTAD data cannot be deemed exhaustive. Fuller analytics exist "
         "in subscription databases (Jus Mundi, GAR ART) not used by this tool.\n"
@@ -827,7 +967,7 @@ def freshness_footer():
 
 def profile_md(p):
     # v0.9.1 (A7/B1): no builder jargon, "Appointments" never "Seats".
-    L = [f"# Dataset profile — {p['token']} (UNCTAD 2023 Excel, snapshot {SNAPSHOT})", ""]
+    L = [f"# Dataset profile — {p['token']} (UNCTAD {SNAPSHOT_YEAR} Excel, snapshot {SNAPSHOT})", ""]
     yrs = f"{p['years'][0]}–{p['years'][1]}" if p["years"] else "n/a"
     # v0.9.3 (A6): served vs replaced split in the headline, printed only when
     # a replaced appointment exists.
@@ -853,6 +993,7 @@ def profile_md(p):
     L.append(f"| Appointing side (base role) | {p['appointing']} |")
     L.append(f"| Rules | {p['rules']} |")
     L.append(f"| Sectors (top) | {p['sectors']} |")
+    L.append(f"| Subsectors (top) | {p['subsectors']} |")
     L.append(f"| Respondent States (top) | {p['respondents']} |")
     L.append(f"| Investor home States (top) | {p['home_states']} |")
     # v0.9.3 (A15): the treaty row previously said "(top)" while silently
@@ -890,6 +1031,17 @@ def profile_md(p):
             L.append(f"  - {o['case']}: {o['kind']} — {o['decision']} "
                      f"(recorded author: {o['author']})")
     L.append("")
+    # v1.1.1 (fix 6): annulled / set-aside awards — outcome only, never a ground.
+    und = p.get("annulled_or_set_aside", [])
+    L.append(f"## Cases with an annulment or set-aside in the follow-on record: {len(und)}")
+    L.append("Source: UNCTAD follow-on fields, which record outcomes but NOT grounds. "
+             "An annulment or set-aside may rest on grounds unrelated to any arbitrator, "
+             "and a later proceeding may have reversed it (the full follow-on sequence is "
+             "shown, in UNCTAD's order). Never imply a ground; it comes only from the "
+             "decision itself (\"check the record on annulled awards\").")
+    for u in und:
+        L.append(f"- {u['case']} ({u['year']}; role: {u['role']}): {' -> '.join(u['follow_on'])}")
+    L.append("")
     L.append("## Issue exposure (tribunal-level; NEVER a personal win-rate)")
     # v0.9.3 (A4/F12): column renamed and disclaimed — it counts co-occurrence
     # (an opinion of any kind in a case where that breach was found), not a
@@ -902,7 +1054,7 @@ def profile_md(p):
              "that breach was found — NOT a dissent on that issue. Per-issue votes "
              "require the decisions themselves (\"check the record on her/his votes\").")
     L.append("")
-    L.append("[Record checks not run: per-holding votes, law firms, challenges, "
+    L.append("[Record checks not run: per-holding votes, law firms, challenges, annulled awards, "
              "double-hatting, publications review — available on request "
              "(\"check the record on <topic>\")]")
     return "\n".join(L)
@@ -925,14 +1077,16 @@ def find_excel(preferred):
         try:
             import openpyxl
             wb = openpyxl.load_workbook(path, read_only=True)
-            ws = wb[wb.sheetnames[0]]
-            for r in ws.iter_rows(min_row=HEADER_ROW, max_row=HEADER_ROW,
-                                  values_only=True):
-                cells = [str(c or "") for c in r]
-                return "ARBITRATORS" in cells and "NO." in cells
+            return header_row_of(wb[wb.sheetnames[0]]) is not None
         except Exception:
             return False
-        return False
+
+    def release(path):
+        try:
+            import openpyxl
+            return release_of(openpyxl.load_workbook(path, read_only=True))
+        except Exception:
+            return None
 
     search_dirs = [os.path.dirname(preferred) or ".", "."]
     candidates = []
@@ -940,20 +1094,25 @@ def find_excel(preferred):
         for f in sorted(glob.glob(os.path.join(d, "*.xlsx"))):
             if f not in candidates and is_unctad(f):
                 candidates.append(f)
-    if len(candidates) == 1:
-        print(f"[excel not found at {preferred}; using validated UNCTAD workbook "
-              f"{candidates[0]} instead (v0.9.2 discovery)]", file=sys.stderr)
-        return candidates[0]
-    if len(candidates) > 1:
-        sys.exit(f"ERROR: no workbook at {preferred} and several UNCTAD-schema "
-                 f"candidates found: {candidates}. Pass one explicitly with --excel.")
+    current = [c for c in candidates if is_required_release(release(c))]
+    if len(current) == 1:
+        print(f"[excel not found at {preferred}; using validated UNCTAD {SNAPSHOT} workbook "
+              f"{current[0]} instead]", file=sys.stderr)
+        return current[0]
+    if len(current) > 1:
+        sys.exit(f"ERROR: no workbook at {preferred} and several {SNAPSHOT} UNCTAD "
+                 f"candidates found: {current}. Pass one explicitly with --excel.")
+    if candidates:
+        print(WRONG_RELEASE_MSG.format(path=", ".join(candidates),
+                                       found=", ".join(str(release(c)) for c in candidates)))
+        sys.exit(3)
     sys.exit(
         f"ERROR: the UNCTAD ISDS Navigator full-data Excel was not found.\n"
         f"  Looked for: {preferred}, then any *.xlsx with the UNCTAD schema in "
         f"{search_dirs}.\n"
-        f"  Fix: download it yourself (investmentpolicy.unctad.org -> ISDS "
-        f"Navigator -> full data download) and place it in the skill's data/ "
-        f"folder (any filename), or pass --excel PATH.\n"
+        f"  Fix: download the {SNAPSHOT} release yourself ({RELEASE_FILE} ; release "
+        f"page {RELEASE_PAGE}) and place it in the skill's data/ folder (any "
+        f"filename), or pass --excel PATH.\n"
         f"  NOTE (cloud sessions): the container-side data/ folder does not "
         f"persist between sessions — check the connected project folder (e.g. "
         f"isds-arbitrators/data/) for the user's copy before asking for a new "
@@ -964,7 +1123,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--excel", default=os.path.join(os.path.dirname(__file__) or ".",
                                                     "..", "data",
-                                                    "UNCTAD-ISDS-Navigator-data-set-31December2023.xlsx"))
+                                                    "UNCTAD-ISDS-Navigator-data-set-31December2025.xlsx"))
     ap.add_argument("--aliases", default=os.path.join(os.path.dirname(__file__) or ".",
                                                       "..", "assets", "curated-aliases.json"))
     ap.add_argument("--arbitrator")
@@ -974,6 +1133,8 @@ def main():
                     help="issue substring; repeatable — repeated flags are combined "
                          "(a case category counts once even if it matches several)")
     ap.add_argument("--rules"); ap.add_argument("--sector")
+    ap.add_argument("--subsector", help="substring of UNCTAD's ECONOMIC SUBSECTOR, e.g. "
+                    "\"61 - Telecommunications\"; adds a subsector_match signal")
     ap.add_argument("--respondent"); ap.add_argument("--role")
     ap.add_argument("--raw-scores", action="store_true",
                     help="legacy scoring: weights applied to raw counts with no "
@@ -1055,7 +1216,8 @@ def main():
             with open(args.weights) as f:
                 weights.update(json.load(f))
         res = ds.shortlist(issue=args.issue, found_only=args.found, rules=args.rules,
-                           sector=args.sector, respondent=args.respondent, role=args.role,
+                           sector=args.sector, subsector=args.subsector,
+                           respondent=args.respondent, role=args.role,
                            treaty=args.treaty, weights=weights, top=args.top,
                            min_seats=args.min_seats, respondent_gate=args.respondent_gate,
                            raw_scores=args.raw_scores)
@@ -1069,6 +1231,7 @@ def main():
             print(json.dumps({"filters": dict(issue=args.issue, found_only=args.found,
                                               treaty=args.treaty, rules=args.rules,
                                               sector=args.sector,
+                                              subsector=args.subsector,
                                               respondent=args.respondent,
                                               respondent_gate=args.respondent_gate,
                                               role=args.role,
@@ -1080,7 +1243,8 @@ def main():
         print("## Shortlist (dataset screening only — per-candidate live check, sourced "
               "availability check, and record checks required before use)")
         print(f"Filters: issue={args.issue!r} found_only={args.found} treaty={args.treaty!r} "
-              f"rules={args.rules!r} sector={args.sector!r} respondent={args.respondent!r} "
+              f"rules={args.rules!r} sector={args.sector!r} subsector={args.subsector!r} "
+              f"respondent={args.respondent!r} "
               f"role={args.role!r} min_seats={args.min_seats}")
         print(f"RANKING WEIGHTS (user-adjustable via --weights): {json.dumps(weights)}")
         if args.raw_scores:
@@ -1096,18 +1260,23 @@ def main():
         # v0.9.2: "Appointments", never "Seats" (R4 wording rule; raw output
         # leaks into run folders).
         if args.raw_scores:
-            print("| # | Arbitrator | Score | Appointments | Pending@snap | Subscores |")
-            print("|---|---|---|---|---|---|")
-            for i, r in enumerate(res, 1):
-                print(f"| {i} | {r['token']} | {r['score']} | {r['seats']} | {r['pending']} "
-                      f"| {json.dumps(r['subscores'])} |")
-        else:
-            print("| # | Arbitrator | Score | Appointments | Pending@snap | Subscores (raw) "
-                  "| Weighted contributions |")
+            print("| # | Arbitrator | Score | Appointments | Pending@snap | Awards annulled/set aside | Subscores |")
             print("|---|---|---|---|---|---|---|")
             for i, r in enumerate(res, 1):
                 print(f"| {i} | {r['token']} | {r['score']} | {r['seats']} | {r['pending']} "
+                      f"| {r['annulled_or_set_aside']} | {json.dumps(r['subscores'])} |")
+        else:
+            print("| # | Arbitrator | Score | Appointments | Pending@snap | Awards annulled/set aside "
+                  "| Subscores (raw) | Weighted contributions |")
+            print("|---|---|---|---|---|---|---|---|")
+            for i, r in enumerate(res, 1):
+                print(f"| {i} | {r['token']} | {r['score']} | {r['seats']} | {r['pending']} "
+                      f"| {r['annulled_or_set_aside']} "
                       f"| {json.dumps(r['subscores'])} | {json.dumps(r['contributions'])} |")
+        print("Awards annulled/set aside: count of the candidate's cases whose UNCTAD "
+              "follow-on record contains an annulment or set-aside entry. Outcome only: "
+              "the ground is not recorded and may be unrelated to any arbitrator, and a "
+              "later proceeding may have reversed it (see the arbitrator profile). Not scored.")
         print(freshness_footer())
         return
 

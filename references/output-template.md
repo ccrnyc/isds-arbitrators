@@ -8,12 +8,12 @@ Reference specimen: `references/example-profile.md` (trimmed worked example). Re
 ## Section order (one md table: Section | Content | Source)
 
 1. **Identity** — name (canonical + aliases seen in sources); nationality [ICSID profile, self-reported]; gender [public self-description; else "not publicly stated"]; languages; affiliation; CV & profile links (CV link first, with visible fetch-blocked note where applicable).
-2. **Appointments**\* — ONE unified section merging the Excel and the live ICSID lookup; never split "snapshot" vs "post-snapshot" into separate sections. Rows: total known (Excel count + post-2023 cases listed with *italicized* names + case nos.); by appointing side; by rules; pending; annulment committees. Mixed-source rows cite "both sources\*".
+2. **Appointments**\* — ONE unified section merging the Excel and the live ICSID lookup; never split "snapshot" vs "post-snapshot" into separate sections. Rows: total known (Excel count + post-snapshot cases listed with *italicized* names + case nos.); by appointing side; by rules; pending; annulment committees. Mixed-source rows cite "both sources\*".
 3. **Dissents and separate writings**\*\* — count over the dissentable-decision denominator; list each opinion: *case*, kind, decision + date, [languages] where multi-version.
 4. **Issue exposure**† — per issue: "appointed in N, dissented in D".
-5. **Experience mix** — sectors, treaties, respondents, investor home states, co-panelists, presidents sat under.
+5. **Experience mix** — sectors, treaties, respondents, investor home States, co-panelists, presidents sat under. Counts are of cases, per value: a case listed under two sectors, treaties or home States counts once under each, and a value UNCTAD repeats within one cell (a sector repeated once per subsector) still counts once (the engine splits UNCTAD's multi-value cells). Label sector figures per the sector-label wording rule.
 6. **Publications** — issue-relevant titles with links; visible CV-fetch note; content-review offer.
-7. **Flags for counsel** (research signals, not findings) — appointing-side asymmetry, repeat appointments (→ IBA Guidelines check by counsel), pairings, then the record-check items as scoped offers.
+7. **Flags for counsel** (research signals, not findings) — appointing-side asymmetry, repeat appointments (→ IBA Guidelines check by counsel), pairings, awards annulled or set aside in the arbitrator's cases (engine: "Cases with an annulment or set-aside in the follow-on record" — list each case with the arbitrator's role and the FULL UNCTAD follow-on sequence, so a later reversal is visible; outcome only, never a ground; scoped offer "check the record on annulled awards"), then the record-check items as scoped offers.
 8. **Source conflicts** (standing row) — every value where sources disagree, both values shown with source names; "none found this run" when empty. Standing caveat in the row: ICSID profiles record appointments HELD, not final tribunal composition — a systematic conflict source against UNCTAD's "(replaced)" markers; never call two partially-overlapping lists "consistent".
 9. **Panel designation status** (standing row) — current ICSID Panel of Arbitrators designation from the live profile where retrieved (a lapsed designation is the same class of live signal as an availability check); "not checked this run" is permitted ONLY where no profile fetch occurred — if the profile page was retrieved this run, read the designation from it.
 
@@ -22,16 +22,18 @@ Reference specimen: `references/example-profile.md` (trimmed worked example). Re
 - **No builder jargon in deliverables or chat:** never "Tier 1", "Tier 2", "Mode 1/2", "engine", "rung", "Seats". Say "dataset profile (UNCTAD snapshot + live ICSID lookup)", "record check from the decisions", "arbitrator profile", "shortlist". A profile's subtitle line is e.g. "Arbitrator profile — prepared with the isds-arbitrators skill", never "Mode 1 profile". **Final step before delivery: scan every user-facing file for the banned terms**; builder notes go to the run log.
 - **Availability wording:** death/retirement/unavailability only with a named, dated source; the sourced negative is "no notice found at [sources, dates] — not confirmation; confirm directly"; otherwise "availability-unverified".
 - "Appointments" / "appointed in N, dissented in D" — never "seats"/"sat".
-- Name sources in full: "UNCTAD 2023 Excel records 1", not "Excel records 1".
+- Name sources in full: "UNCTAD 2025 Excel records 1", not "Excel records 1".
 - Names: use the dataset's own form; never expand an initial to a full given name without profile-level verification from a named source.
 - *Italicize case names.*
 - No editorializing parentheticals in section headers; the substance goes to a footnote.
 - Conflicting values: show both, name both sources, flag the conflict in the row.
+- **Sector labels:** label every sector count by the UNCTAD category actually counted — e.g. "ICT cases (UNCTAD sector J)". Use a narrower industry word ("telecoms") only when the subsector filter was used (`--subsector "61 - Telecommunications"`); sector J also covers publishing, broadcasting and media.
+- **Annulled or set-aside awards:** say what UNCTAD records (annulled in its entirety / partially annulled / set aside / partially set aside, plus any later entry) and nothing more. The dataset never records the ground; never suggest that the arbitrator caused it.
 
 ## Footnotes (all assumptions/provisos at the END, keyed in order of first appearance: \*, \*\*, †, ‡)
 
 - Retrieved-extract spec: whenever a live profile page is relied on, save the extract with provenance header AND the role/appointing-party labels for every entry used — case numbers alone leave role claims unpreserved. Name each artefact "retrieved - <source> - <subject> <YYYY-MM-DD>.md". **Values in the extract are the page's own text, not a summariser's rendering; where an extraction layer and the page disagree, record the page text and note the conflict.** The spec covers **every primary document a deliverable value rests on, non-ICSID included**: archive it into `retrieved/` with route + date — a fetch logged only in the transcript is not an archived source.
-- \* Data freshness: Excel snapshot vs live Navigator vs retrieval date; live layer is ICSID-only, self-reported, and a FLOOR rather than a case list (measured coverage gaps; profile silence is weak evidence of inactivity — combined totals are "at least", never exhaustive); post-2023 UNCITRAL/PCA/SCC invisible — assert nothing; non-treaty/annulment-phase profile cases disclosed but excluded from counts.
+- \* Data freshness: Excel snapshot vs live Navigator vs retrieval date; live layer is ICSID-only, self-reported, and a FLOOR rather than a case list (measured coverage gaps; profile silence is weak evidence of inactivity — combined totals are "at least", never exhaustive); post-snapshot UNCITRAL/PCA/SCC invisible — assert nothing; non-treaty/annulment-phase profile cases disclosed but excluded from counts.
 - \*\* Dissent counting: named-author published opinions only; silence ≠ proven unanimity; denominator = cases with ≥1 substantive decision (award or decision on jurisdiction/merits-liability/quantum-damages; consent awards, orders, bifurcation, rectification, revision, discontinuances excluded). The snapshot can also UNDERCOUNT separate writings — post-snapshot opinions exist (e.g. a 2024 Declaration on Costs); a record check may add to the count, never only confirm it.
 - † Outcomes are tribunal-level, not individual votes; to review individual positions, ask to "check the record" on the topic.
 - ‡ Scope: treaty-based ISDS only; commercial appointments and confidential cases invisible; not exhaustive; Jus Mundi/GAR ART for fuller analytics; not legal advice.
@@ -40,7 +42,7 @@ Reference specimen: `references/example-profile.md` (trimmed worked example). Re
 ## Notes-to-users — make them VISIBLE, and SCOPE every trigger
 
 Every record-check offer and every action the user must take (e.g. CV download-then-upload) is set on the pattern:
-`▸ **Want X? Say "check the record on <topic>."**` — the trigger names its topic: "on dissents", "on annulment committees", "on her votes", "on challenges", "on double-hatting", "on counsel patterns", "on publications", "on newer cases", "on intra-EU jurisdiction", "on pending status". Never a bare "check the record".
+`▸ **Want X? Say "check the record on <topic>."**` — the trigger names its topic: "on dissents", "on annulment committees", "on her votes", "on challenges", "on double-hatting", "on counsel patterns", "on publications", "on newer cases", "on intra-EU jurisdiction", "on pending status", "on annulled awards". Never a bare "check the record".
 `▸ **CV auto-fetch is blocked … download and upload it here, or let Claude in Chrome open it.**`
 
 ## Companions per profile
@@ -63,4 +65,4 @@ The engine emits this formatting; sheets built by hand (e.g. a comparison sheet,
 
 ## Comparison sheet (selection runs)
 
-Same wording/footnote rules; one row per candidate × key metrics; ranking weights printed above the table; gender balance line; every finalist links to their profile table.
+Same wording/footnote rules; one row per candidate × key metrics; ranking weights printed above the table; gender balance line; every finalist links to their profile table. Include the shortlist's "Awards annulled/set aside" count per candidate (outcome only; details in the profile's Flags row) and label sector columns per the sector-label wording rule.

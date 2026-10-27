@@ -16,6 +16,9 @@ Where a case page lists no standalone document for a recorded decision or opinio
 ## Annulment-committee record
 UNCTAD Excel col. 25 undercounts. Reconcile: Excel FOLLOW-ON fields + ICSID profile committee entries + live case pages; cite each source.
 
+## Annulled / set-aside awards
+For each case in the profile's "Cases with an annulment or set-aside in the follow-on record" list: retrieve the annulment decision or the court judgment (ICSID via `isds-research`; national-court judgments from the court's own site or a public law database) and report (a) the ground as the decision states it — for ICSID, which Art. 52(1) limb; (b) whether that ground concerned this arbitrator (constitution, disclosure, independence) or something else (reasons, excess of powers, procedure); (c) any later proceeding in the follow-on sequence that reversed or replaced the outcome (appeal, resubmission). Voice discipline applies: the committee's or court's own finding, never a party's argument. Never characterise the ground from the UNCTAD row or a secondary report; an unretrieved decision is reported as "ground not established".
+
 ## Challenges / disqualification proposals
 Targeted search for published decisions on disqualification (ICSID + WebSearch) naming the candidate; report grounds + outcome + source tags; state expressly that unpublished challenges are invisible.
 

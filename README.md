@@ -35,7 +35,7 @@ To use the skill, just ask — e.g. *"Tell me about arbitrator Brigitte Stern"* 
 
 The dataset layer runs on UNCTAD's official full-data Excel, which is **not included in this repo**: UNCTAD's [Terms of Use](https://investmentpolicy.unctad.org/pages/1048/terms-and-conditions-of-use) permit personal, non-commercial use but bar redistribution, so each user downloads their own copy directly from UNCTAD (free, no registration):
 
-1. Check UNCTAD's [release page](https://investmentpolicy.unctad.org/publications/1303/investment-dispute-settlement-navigator-full-isds-data-release-as-of-31-12-2023-in-excel-format-) for the full-data release; as of this writing the latest is the **31/12/2023 snapshot** (1,332 cases): [direct download](https://investmentpolicy.unctad.org/uploaded-files/document/UNCTAD-ISDS-Navigator-data-set-31December2023.xlsx).
+1. Download the **31/12/2025 release** (1,463 cases) from UNCTAD's [release page](https://investmentpolicy.unctad.org/publications/1325/investment-dispute-settlement-navigator-full-isds-data-release-as-of-31-12-2025-) ([direct download](https://investmentpolicy.unctad.org/uploaded-files/document/UNCTAD-ISDS-Navigator-data-set-31December2025.xlsx)). This version works only with that release; given any other, the engine prints `WRONG_RELEASE` with these links instead of answering. An older file can stay in `data/` — the 31/12/2025 file is picked automatically.
 2. Put the `.xlsx` in this skill's `data/` folder (any filename with the UNCTAD schema is accepted; the engine validates the header row and prints a load-verification line). In a chat you can simply upload the file and ask your assistant to save it into the skill's `data/` folder — see `data/README.txt` for how cloud sessions persist it.
 
 If you run the engine without the file, it prints these same instructions instead of failing cryptically.
@@ -77,7 +77,7 @@ CV hosts (chambers, universities, arbitral institutions) usually block automated
 **Honest limits you should know:**
 
 - **The ICSID profile page is a floor, never a complete case list.** Testing measured roughly 77% coverage of ICSID-numbered appointments for one heavy-load arbitrator, with no pattern explaining the omissions. Counts built on it are "at least", never "is", and absence from the profile is weak evidence of inactivity.
-- **Snapshot data ages.** The Excel is a 31/12/2023 snapshot; for active arbitrators it materially understates current activity. Every output carries a data-freshness footer; newer cases are handled by a live delta workflow, classified by the arbitrator's acceptance date, never by case-number year.
+- **Snapshot data ages.** The Excel is a 31/12/2025 snapshot; for active arbitrators it understates current activity. Every output carries a data-freshness footer; newer cases are handled by a live delta workflow, classified by the arbitrator's acceptance date, never by case-number year.
 - **Availability is never assumed.** Death, retirement, or unavailability is never asserted without a named, dated source, and no candidate is screened out on an unverified availability premise.
 
 **Deliberately does not:** recommend or rank-order the appointment decision itself; assert personal "win rates" or individual votes without the retrieved decisions; cover commercial (non-treaty) arbitration; access Jus Mundi, GAR ART, Arbitrator Intelligence, or italaw by automated fetch; run any bulk harvest. For fuller analytics, every output refers you to the subscription databases built for that job.
